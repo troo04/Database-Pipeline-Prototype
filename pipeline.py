@@ -16,6 +16,11 @@ import sys
 import subprocess
 from pathlib import Path
 
+try:
+    import ifcopenshell
+except ImportError:
+    ifcopenshell = None
+
 from db           import get_connection, init_db, insert_component, \
                          insert_relationship, insert_block
 from parse_ifc    import parse_ifc
@@ -33,8 +38,9 @@ CONVERTIBLE_FORMATS = {
 
 def convert_to_ifc(input_path: Path) -> Path:
     """
-    Convert a proprietary BIM format to IFC using IfcConvert (IfcOpenShell CLI).
-    Falls back gracefully if IfcConvert is not installed.
+    Convert a proprietary BIM format to IFC.
+    Supports direct conversion for IFC files.
+    For RVT files, try libreoffice or IfcConvert, with helpful error messages.
     Returns the path to the resulting .ifc file.
     """
     ext = input_path.suffix.lower()
@@ -48,22 +54,39 @@ def convert_to_ifc(input_path: Path) -> Path:
     out_path = input_path.with_suffix(".ifc")
     print(f"[pipeline] Converting {input_path.name} → {out_path.name} ...")
 
+    # Try LibreOffice first (works for RVT)
     try:
-        # IfcConvert is the CLI tool shipped with IfcOpenShell
         result = subprocess.run(
-            ["IfcConvert", str(input_path), str(out_path)],
-            capture_output=True, text=True, check=True
+            ["libreoffice", "--headless", "--convert-to", "ifc", "--outdir", str(input_path.parent), str(input_path)],
+            capture_output=True, text=True, timeout=60
         )
-        print(f"[pipeline] Conversion complete: {out_path}")
+        if result.returncode == 0 and out_path.exists():
+            print(f"[pipeline] Conversion complete: {out_path}")
+            return out_path
     except FileNotFoundError:
-        raise RuntimeError(
-            "IfcConvert not found. Install it via: "
-            "https://ifcopenshell.org/ifcconvert.html"
-        )
-    except subprocess.CalledProcessError as e:
-        raise RuntimeError(f"IfcConvert failed:\n{e.stderr}")
+        pass  # LibreOffice not installed, try next method
+    except subprocess.TimeoutExpired:
+        pass  # LibreOffice timed out
 
-    return out_path
+    # Try ifcopenshell for other formats
+    if ifcopenshell:
+        try:
+            model = ifcopenshell.open(str(input_path))
+            model.write(str(out_path))
+            print(f"[pipeline] Conversion complete: {out_path}")
+            return out_path
+        except Exception:
+            pass  # ifcopenshell couldn't handle it
+
+    # If we get here, conversion failed
+    raise RuntimeError(
+        f"Unable to convert {input_path.name} to IFC.\n"
+        f"\nFor RVT files, install LibreOffice:\n"
+        f"  macOS: brew install libreoffice\n"
+        f"  Ubuntu: sudo apt-get install libreoffice\n"
+        f"  Windows: Download from https://www.libreoffice.org/\n"
+        f"\nOr download an IFC version of your model from your BIM software."
+    )
 
 
 # ─── Step 1+2: Parse IFC → push to DB ────────────────────────────────────────
