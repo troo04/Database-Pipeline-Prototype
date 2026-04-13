@@ -75,7 +75,7 @@ Add your own rules in `BLOCK_RULES` inside `block_builder.py`.
 
 ## Neo4j (optional upgrade)
 
-If you want graph-native relationship queries, swap `db.py`'s relationship
+We can also use graph-native relationship queries by swapping `db.py`'s relationship
 functions for `neo4j` driver calls. Components and blocks can remain in SQLite;
 only the `relationships` table moves to Neo4j. The rest of the pipeline is
 unchanged.
